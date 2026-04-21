@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Receipts">
+<meta name="theme-color" content="#f5f1e8">
+<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='40' fill='%23f5f1e8'/><text x='90' y='118' font-size='110' text-anchor='middle' font-family='Georgia'>🧾</text></svg>">
+<title>Receipt Ledger</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.5/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f1e8;
+    --paper: #fefcf6;
+    --ink: #1a1510;
+    --ink-soft: #5a524a;
+    --ink-faint: #9a9088;
+    --rule: #d8cfbf;
+    --accent: #c2410c;
+    --accent-soft: #fdecd9;
+    --shadow: 0 1px 2px rgba(26,21,16,0.04), 0 2px 8px rgba(26,21,16,0.06);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Iowan Old Style', 'Palatino', 'Palatino Linotype', Georgia, serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) calc(env(safe-area-inset-bottom) + 80px) env(safe-area-inset-left);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .num { font-family: 'SF Mono', 'Menlo', 'Courier New', monospace; font-variant-numeric: tabular-nums; }
+
+  /* Header */
+  header {
+    padding: 24px 20px 16px;
+    border-bottom: 1px dashed var(--rule);
+    position: relative;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -6px;
+    height: 6px;
+    background-image: radial-gradient(circle at 6px 0, var(--bg) 5px, transparent 5px);
+    background-size: 12px 12px;
+    background-position: 0 -3px;
+  }
+  h1 {
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0;
+  }
+  .tagline {
+    font-size: 28px;
+    font-style: italic;
+    margin: 4px 0 0;
+    color: var(--ink);
+    font-weight: 400;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 0;
+    padding: 14px 20px 0;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .tab {
+    background: none;
+    border: none;
+    padding: 12px 0;
+    margin-right: 28px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--ink-faint);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    letter-spacing: 0.02em;
+  }
+  .tab.active {
+    color: var(--ink);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Panels */
+  .panel { display: none; padding: 20px; }
+  .panel.active { display: block; }
+
+  /* Summary */
+  .summary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 20px;
+  }
+  .total-label {
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .total-amount {
+    font-size: 42px;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+  }
+  .total-amount .cents { font-size: 26px; color: var(--ink-soft); }
+
+  .period-select {
+    display: flex;
+    gap: 4px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 3px;
+    margin-bottom: 20px;
+  }
+  .period-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .period-btn.active { background: var(--ink); color: var(--paper); }
+
+  .category-list {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .cat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .cat-row:last-child { border-bottom: none; }
+  .cat-row.empty { color: var(--ink-faint); font-style: italic; justify-content: center; padding: 32px 16px; }
+  .cat-name { font-size: 15px; }
+  .cat-count { color: var(--ink-faint); font-size: 12px; margin-left: 8px; }
+  .cat-total { font-size: 16px; font-weight: 500; }
+
+  .grand-total {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .grand-total .label { font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; opacity: 0.7; }
+  .grand-total .amount { font-size: 22px; }
+
+  /* Receipt list */
+  .receipt-list { display: flex; flex-direction: column; gap: 12px; }
+  .receipt {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: center;
+    cursor: pointer;
+  }
+  .receipt-thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    background: var(--bg);
+    background-size: cover;
+    background-position: center;
+    border: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: var(--ink-faint);
+  }
+  .receipt-info { min-width: 0; }
+  .receipt-vendor {
+    font-size: 15px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .receipt-meta {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-top: 2px;
+  }
+  .receipt-amount {
+    font-size: 16px;
+    font-weight: 500;
+    text-align: right;
+  }
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--ink-faint);
+  }
+  .empty-state .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-state .msg { font-style: italic; }
+
+  /* Filters */
+  .filter-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .filter-chip {
+    flex-shrink: 0;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .filter-chip.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+  /* Floating Add Button */
+  .fab {
+    position: fixed;
+    bottom: calc(env(safe-area-inset-bottom) + 20px);
+    right: 20px;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    font-size: 32px;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(194, 65, 12, 0.35), 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .fab:active { transform: scale(0.95); }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(26,21,16,0.5);
+    z-index: 200;
+    display: none;
+    align-items: flex-end;
+  }
+  .modal-backdrop.active { display: flex; }
+  .modal {
+    background: var(--paper);
+    width: 100%;
+    max-height: 92vh;
+    border-radius: 16px 16px 0 0;
+    padding: 20px 20px calc(env(safe-area-inset-bottom) + 20px);
+    overflow-y: auto;
+    animation: slideUp 0.25s ease;
+  }
+  @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .modal-title { font-size: 18px; font-style: italic; margin: 0; }
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    line-height: 1;
+  }
+
+  /* Form */
+  .form-group { margin-bottom: 16px; }
+  label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--bg);
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    -webkit-appearance: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--paper);
+  }
+  textarea { resize: vertical; min-height: 60px; }
+
+  .photo-area {
+    border: 2px dashed var(--rule);
+    border-radius: 8px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    background: var(--bg);
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .photo-area.has-photo { padding: 0; border-style: solid; }
+  .photo-area img { width: 100%; max-height: 300px; object-fit: contain; display: block; }
+  .photo-area .prompt { color: var(--ink-soft); }
+  .photo-area .prompt .icon { font-size: 36px; display: block; margin-bottom: 8px; }
+  .photo-area input[type="file"] { display: none; }
+  .photo-change {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(26,21,16,0.8);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+  }
+
+  .btn-primary {
+    width: 100%;
+    padding: 14px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .btn-primary:disabled { opacity: 0.4; }
+  .btn-secondary {
+    width: 100%;
+    padding: 12px;
+    background: none;
+    color: var(--accent);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+
+  /* Detail view */
+  .detail-photo {
+    width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-bottom: 16px;
+  }
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--rule);
+    font-size: 15px;
+  }
+  .detail-row .key { color: var(--ink-soft); }
+  .detail-row .val { font-weight: 500; text-align: right; }
+  .amount-big {
+    font-size: 36px;
+    text-align: center;
+    padding: 20px 0;
+    border-bottom: 1px dashed var(--rule);
+    margin-bottom: 12px;
+  }
+
+  .toolbar-row {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px 0;
+  }
+  .tool-btn {
+    flex: 1;
+    padding: 10px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .install-hint {
+    margin: 16px 20px 0;
+    padding: 12px;
+    background: var(--accent-soft);
+    border-radius: 6px;
+    font-size: 13px;
+    color: #7a2808;
+    font-style: italic;
+    display: none;
+  }
+  .install-hint.show { display: block; }
+  .install-hint .close {
+    float: right;
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    color: inherit;
+    padding: 0;
+    margin-left: 8px;
+  }
+
+  /* OCR progress overlay */
+  .ocr-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(254, 252, 246, 0.95);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    border-radius: 8px;
+    z-index: 5;
+  }
+  .ocr-overlay.show { display: flex; }
+  .ocr-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--rule);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ocr-status {
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-style: italic;
+    text-align: center;
+    padding: 0 20px;
+  }
+  .ocr-progress-bar {
+    width: 60%;
+    height: 3px;
+    background: var(--rule);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .ocr-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  .ocr-notice {
+    background: var(--accent-soft);
+    color: #7a2808;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 12px;
+    font-style: italic;
+    display: none;
+  }
+  .ocr-notice.show { display: block; }
+  .ocr-notice strong { font-style: normal; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Receipt Ledger</h1>
+  <p class="tagline">A quiet place for business expenses.</p>
+</header>
+
+<div class="tabs">
+  <button class="tab active" data-tab="receipts">Receipts</button>
+  <button class="tab" data-tab="summary">Summary</button>
+</div>
+
+<div class="toolbar-row">
+  <button class="tool-btn" id="exportBtn">↓ Export CSV</button>
+  <button class="tool-btn" id="importBtn">↑ Import Backup</button>
+  <input type="file" id="importFile" accept=".json" style="display:none">
+</div>
+
+<div id="installHint" class="install-hint">
+  <button class="close" onclick="document.getElementById('installHint').classList.remove('show')">×</button>
+  <strong>Install as app:</strong> Tap the Share button in Safari, then "Add to Home Screen."
+</div>
+
+<!-- RECEIPTS PANEL -->
+<div class="panel active" id="panel-receipts">
+  <div class="filter-bar" id="filterBar">
+    <button class="filter-chip active" data-cat="all">All</button>
+  </div>
+  <div id="receiptList" class="receipt-list"></div>
+</div>
+
+<!-- SUMMARY PANEL -->
+<div class="panel" id="panel-summary">
+  <div class="summary-header">
+    <div>
+      <div class="total-label">Total Spend</div>
+      <div class="total-amount" id="totalAmount">$0<span class="cents">.00</span></div>
+    </div>
+  </div>
+  <div class="period-select">
+    <button class="period-btn" data-period="month">This Month</button>
+    <button class="period-btn" data-period="quarter">Quarter</button>
+    <button class="period-btn" data-period="year">This Year</button>
+    <button class="period-btn active" data-period="all">All Time</button>
+  </div>
+  <div class="category-list" id="categoryList"></div>
+  <div class="grand-total">
+    <span class="label">Grand Total</span>
+    <span class="amount num" id="grandTotal">$0.00</span>
+  </div>
+</div>
+
+<!-- Add Button -->
+<button class="fab" id="addBtn" aria-label="Add receipt">+</button>
+
+<!-- Add/Edit Modal -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle">New Receipt</h2>
+      <button class="close-btn" id="closeModal">×</button>
+    </div>
+    <form id="receiptForm">
+      <label class="photo-area" id="photoArea">
+        <input type="file" id="photoInput" accept="image/*">
+        <div class="prompt" id="photoPrompt">
+          <span class="icon">📷</span>
+          <div>Tap to snap or choose a photo</div>
+          <div style="font-size:12px; margin-top:6px; opacity:0.7;">Fields will auto-fill from the receipt</div>
+        </div>
+        <div class="ocr-overlay" id="ocrOverlay">
+          <div class="ocr-spinner"></div>
+          <div class="ocr-status" id="ocrStatus">Reading receipt…</div>
+          <div class="ocr-progress-bar"><div class="ocr-progress-fill" id="ocrProgress"></div></div>
+        </div>
+      </label>
+
+      <div class="ocr-notice" id="ocrNotice">
+        <strong>✓ Auto-filled from receipt.</strong> Please double-check each field before saving.
+      </div>
+
+      <div class="form-group">
+        <label for="amount">Amount</label>
+        <input type="number" id="amount" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
+      </div>
+
+      <div class="form-group">
+        <label for="vendor">Vendor / Where</label>
+        <input type="text" id="vendor" placeholder="e.g. Home Depot" required>
+      </div>
+
+      <div class="form-group">
+        <label for="category">Category</label>
+        <select id="category" required>
+          <option value="">Select a category...</option>
+          <option value="Meals & Entertainment">Meals & Entertainment</option>
+          <option value="Travel & Mileage">Travel & Mileage</option>
+          <option value="Office Supplies">Office Supplies</option>
+          <option value="Software & Subscriptions">Software & Subscriptions</option>
+          <option value="Equipment">Equipment</option>
+          <option value="Advertising/Marketing">Advertising/Marketing</option>
+          <option value="Vehicle/Gas">Vehicle/Gas</option>
+          <option value="Utilities">Utilities</option>
+          <option value="Contractors/Labor">Contractors/Labor</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="date">Date</label>
+        <input type="date" id="date" required>
+      </div>
+
+      <div class="form-group">
+        <label for="notes">Notes (optional)</label>
+        <textarea id="notes" placeholder="Client meeting, project name, etc."></textarea>
+      </div>
+
+      <button type="submit" class="btn-primary" id="saveBtn">Save Receipt</button>
+      <button type="button" class="btn-secondary" id="deleteBtn" style="display:none; color:#c2410c;">Delete Receipt</button>
+    </form>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-backdrop" id="detailBackdrop">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Receipt</h2>
+      <button class="close-btn" id="closeDetail">×</button>
+    </div>
+    <div id="detailContent"></div>
+    <button type="button" class="btn-primary" id="editBtn" style="margin-top:16px;">Edit</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const STORAGE_KEY = 'receipt_ledger_v1';
+  const CATEGORIES = [
+    'Meals & Entertainment','Travel & Mileage','Office Supplies',
+    'Software & Subscriptions','Equipment','Advertising/Marketing',
+    'Vehicle/Gas','Utilities','Contractors/Labor','Other'
+  ];
+
+  let state = {
+    receipts: [],
+    activeFilter: 'all',
+    activePeriod: 'all',
+    editingId: null,
+    pendingPhoto: null
+  };
+
+  // ---------- Storage ----------
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) state.receipts = JSON.parse(raw);
+    } catch(e) {
+      console.error('Load failed', e);
+      state.receipts = [];
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.receipts));
+    } catch(e) {
+      alert('Storage full. Try exporting and deleting old receipts, or use smaller photos.');
+    }
+  }
+
+  // ---------- Helpers ----------
+  function fmt(amt) {
+    const n = Number(amt) || 0;
+    return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function fmtBig(amt) {
+    const n = Number(amt) || 0;
+    const parts = n.toFixed(2).split('.');
+    parts[0] = '$' + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts[0] + '<span class="cents">.' + parts[1] + '</span>';
+  }
+  function fmtDate(s) {
+    if (!s) return '';
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  // Resize image to keep storage small
+  function resizeImage(file, maxDim = 1200, quality = 0.7) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) { height = height * (maxDim / width); width = maxDim; }
+            else { width = width * (maxDim / height); height = maxDim; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---------- Rendering ----------
+  function renderFilters() {
+    const bar = document.getElementById('filterBar');
+    const used = new Set(state.receipts.map(r => r.category));
+    const activeCats = CATEGORIES.filter(c => used.has(c));
+    bar.innerHTML = '<button class="filter-chip ' + (state.activeFilter === 'all' ? 'active' : '') + '" data-cat="all">All</button>' +
+      activeCats.map(c => '<button class="filter-chip ' + (state.activeFilter === c ? 'active' : '') + '" data-cat="' + c.replace(/"/g, '&quot;') + '">' + c + '</button>').join('');
+
+    bar.querySelectorAll('.filter-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.activeFilter = btn.dataset.cat;
+        renderReceipts();
+        renderFilters();
+      });
+    });
+  }
+
+  function renderReceipts() {
+    const list = document.getElementById('receiptList');
+    let items = state.receipts.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.id.localeCompare(a.id));
+    if (state.activeFilter !== 'all') items = items.filter(r => r.category === state.activeFilter);
+
+    if (items.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="icon">🧾</div><div class="msg">' +
+        (state.receipts.length === 0 ? 'No receipts yet. Tap + to add your first.' : 'No receipts in this category.') +
+        '</div></div>';
+      return;
+    }
+
+    list.innerHTML = items.map(r => {
+      const thumb = r.photo
+        ? '<div class="receipt-thumb" style="background-image:url(' + r.photo + ')"></div>'
+        : '<div class="receipt-thumb">🧾</div>';
+      return '<div class="receipt" data-id="' + r.id + '">' +
+        thumb +
+        '<div class="receipt-info">' +
+          '<div class="receipt-vendor">' + escapeHtml(r.vendor) + '</div>' +
+          '<div class="receipt-meta">' + escapeHtml(r.category) + ' · ' + fmtDate(r.date) + '</div>' +
+        '</div>' +
+        '<div class="receipt-amount num">' + fmt(r.amount) + '</div>' +
+      '</div>';
+    }).join('');
+
+    list.querySelectorAll('.receipt').forEach(el => {
+      el.addEventListener('click', () => openDetail(el.dataset.id));
+    });
+  }
+
+  function filterByPeriod(receipts, period) {
+    if (period === 'all') return receipts;
+    const now = new Date();
+    return receipts.filter(r => {
+      if (!r.date) return false;
+      const d = new Date(r.date + 'T00:00:00');
+      if (period === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      if (period === 'year') return d.getFullYear() === now.getFullYear();
+      if (period === 'quarter') {
+        const q = Math.floor(now.getMonth() / 3);
+        const dq = Math.floor(d.getMonth() / 3);
+        return d.getFullYear() === now.getFullYear() && dq === q;
+      }
+      return true;
+    });
+  }
+
+  function renderSummary() {
+    const filtered = filterByPeriod(state.receipts, state.activePeriod);
+    const totals = {};
+    let grand = 0;
+    filtered.forEach(r => {
+      const amt = Number(r.amount) || 0;
+      totals[r.category] = (totals[r.category] || { total: 0, count: 0 });
+      totals[r.category].total += amt;
+      totals[r.category].count += 1;
+      grand += amt;
+    });
+
+    document.getElementById('totalAmount').innerHTML = fmtBig(grand);
+    document.getElementById('grandTotal').textContent = fmt(grand);
+
+    const sorted = Object.entries(totals).sort((a, b) => b[1].total - a[1].total);
+    const list = document.getElementById('categoryList');
+    if (sorted.length === 0) {
+      list.innerHTML = '<div class="cat-row empty">No expenses in this period.</div>';
+    } else {
+      list.innerHTML = sorted.map(([cat, data]) =>
+        '<div class="cat-row">' +
+          '<div><span class="cat-name">' + escapeHtml(cat) + '</span><span class="cat-count num">' + data.count + '</span></div>' +
+          '<div class="cat-total num">' + fmt(data.total) + '</div>' +
+        '</div>'
+      ).join('');
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---------- Modal (Add/Edit) ----------
+  function openModal(id) {
+    const modal = document.getElementById('modalBackdrop');
+    const form = document.getElementById('receiptForm');
+    const title = document.getElementById('modalTitle');
+    const deleteBtn = document.getElementById('deleteBtn');
+    form.reset();
+    state.pendingPhoto = null;
+    document.getElementById('ocrNotice').classList.remove('show');
+
+    if (id) {
+      const r = state.receipts.find(x => x.id === id);
+      if (!r) return;
+      state.editingId = id;
+      title.textContent = 'Edit Receipt';
+      document.getElementById('amount').value = r.amount;
+      document.getElementById('vendor').value = r.vendor;
+      document.getElementById('category').value = r.category;
+      document.getElementById('date').value = r.date;
+      document.getElementById('notes').value = r.notes || '';
+      state.pendingPhoto = r.photo || null;
+      updatePhotoPreview();
+      deleteBtn.style.display = 'block';
+    } else {
+      state.editingId = null;
+      title.textContent = 'New Receipt';
+      document.getElementById('date').value = new Date().toISOString().slice(0, 10);
+      updatePhotoPreview();
+      deleteBtn.style.display = 'none';
+    }
+    modal.classList.add('active');
+  }
+
+  function closeModal() {
+    document.getElementById('modalBackdrop').classList.remove('active');
+    state.editingId = null;
+    state.pendingPhoto = null;
+  }
+
+  function updatePhotoPreview() {
+    const area = document.getElementById('photoArea');
+    const prompt = document.getElementById('photoPrompt');
+    const existing = area.querySelector('img');
+    if (existing) existing.remove();
+    const existingChange = area.querySelector('.photo-change');
+    if (existingChange) existingChange.remove();
+
+    if (state.pendingPhoto) {
+      const img = document.createElement('img');
+      img.src = state.pendingPhoto;
+      area.insertBefore(img, area.firstChild);
+      const changeBtn = document.createElement('div');
+      changeBtn.className = 'photo-change';
+      changeBtn.textContent = 'Change photo';
+      area.appendChild(changeBtn);
+      area.classList.add('has-photo');
+      prompt.style.display = 'none';
+    } else {
+      area.classList.remove('has-photo');
+      prompt.style.display = 'block';
+    }
+  }
+
+  document.getElementById('photoInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      state.pendingPhoto = await resizeImage(file);
+      updatePhotoPreview();
+      // Run OCR on the resized photo if we're adding a new receipt (not editing existing)
+      if (!state.editingId) {
+        await runOCR(state.pendingPhoto);
+      }
+    } catch(err) {
+      alert('Could not load photo. Try a different one.');
+    }
+  });
+
+  // ---------- OCR ----------
+  async function runOCR(dataUrl) {
+    if (typeof Tesseract === 'undefined') {
+      console.warn('Tesseract not loaded');
+      return;
+    }
+    const overlay = document.getElementById('ocrOverlay');
+    const status = document.getElementById('ocrStatus');
+    const progress = document.getElementById('ocrProgress');
+    const notice = document.getElementById('ocrNotice');
+
+    overlay.classList.add('show');
+    status.textContent = 'Reading receipt…';
+    progress.style.width = '0%';
+
+    try {
+      const result = await Tesseract.recognize(dataUrl, 'eng', {
+        logger: (m) => {
+          if (m.status === 'loading tesseract core') status.textContent = 'Loading (first time only)…';
+          else if (m.status === 'initializing tesseract') status.textContent = 'Starting up…';
+          else if (m.status === 'loading language traineddata') status.textContent = 'Loading language data…';
+          else if (m.status === 'initializing api') status.textContent = 'Preparing…';
+          else if (m.status === 'recognizing text') {
+            status.textContent = 'Reading text…';
+            progress.style.width = Math.round(m.progress * 100) + '%';
+          }
+        }
+      });
+      const text = result.data.text || '';
+      state.lastOCRText = text; // stored for debugging via window.debugOCR()
+      const parsed = parseReceiptText(text);
+      applyOCRResults(parsed);
+      // Show what was auto-filled vs what needs manual entry
+      const missing = [];
+      if (!parsed.amount) missing.push('amount');
+      if (!parsed.vendor) missing.push('vendor');
+      if (!parsed.date) missing.push('date');
+      const noticeEl = document.getElementById('ocrNotice');
+      if (missing.length === 0) {
+        noticeEl.innerHTML = '<strong>✓ Auto-filled from receipt.</strong> Please double-check each field before saving.';
+      } else {
+        noticeEl.innerHTML = '<strong>Partially read.</strong> Couldn\'t find: ' + missing.join(', ') + '. Please fill in manually.';
+      }
+      noticeEl.classList.add('show');
+    } catch (err) {
+      console.error('OCR failed', err);
+      status.textContent = 'Could not read — please fill in manually.';
+      await new Promise(r => setTimeout(r, 1500));
+    } finally {
+      overlay.classList.remove('show');
+    }
+  }
+
+  function parseReceiptText(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    return {
+      amount: findAmount(text, lines),
+      vendor: findVendor(lines),
+      date: findDate(text),
+      category: null // will be filled based on vendor
+    };
+  }
+
+  function findAmount(text, lines) {
+    // Prefer lines that explicitly mention "total"
+    const totalKeywords = /\b(grand\s*total|total\s*due|balance\s*due|amount\s*due|total|balance)\b/i;
+    const excludeKeywords = /\b(subtotal|sub\s*total|tax|change|tendered|cash|credit|card|tip)\b/i;
+    const priceRegex = /\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g;
+
+    // Pass 1: look for lines containing "total" but not "subtotal"/"tax"/etc.
+    const candidates = [];
+    for (const line of lines) {
+      if (totalKeywords.test(line) && !excludeKeywords.test(line)) {
+        const matches = [...line.matchAll(priceRegex)];
+        if (matches.length) {
+          const last = matches[matches.length - 1][1];
+          candidates.push(parseFloat(last.replace(/,/g, '')));
+        }
+      }
+    }
+    if (candidates.length) {
+      // Return the largest "total" match (grand total usually wins)
+      return Math.max(...candidates).toFixed(2);
+    }
+
+    // Pass 2: fallback — largest dollar amount anywhere
+    const allMatches = [...text.matchAll(priceRegex)]
+      .map(m => parseFloat(m[1].replace(/,/g, '')))
+      .filter(n => n > 0 && n < 100000); // sanity filter
+    if (allMatches.length) {
+      return Math.max(...allMatches).toFixed(2);
+    }
+    return null;
+  }
+
+  function findVendor(lines) {
+    // Vendor is usually one of the first few non-noise lines
+    const skipPatterns = /^(receipt|invoice|tel|phone|fax|www\.|http|\d{3,}|welcome|thank)/i;
+    const addressPattern = /\b\d+\s+\w+\s+(st|ave|rd|blvd|dr|ln|way|street|avenue|road)\b/i;
+
+    for (let i = 0; i < Math.min(lines.length, 5); i++) {
+      const line = lines[i];
+      if (line.length < 2 || line.length > 50) continue;
+      if (skipPatterns.test(line)) continue;
+      if (addressPattern.test(line)) continue;
+      // Skip lines that are mostly numbers/symbols
+      const letters = (line.match(/[a-zA-Z]/g) || []).length;
+      if (letters < 3) continue;
+      if (letters / line.length < 0.5) continue;
+      // Clean it up
+      return line.replace(/[*#]+/g, '').trim().slice(0, 40);
+    }
+    return null;
+  }
+
+  function findDate(text) {
+    // OCR commonly mis-reads: O→0, l/I→1, B→8, S→5, and / → 1 or |
+    // Normalize: collapse whitespace, but keep newlines for line-based context
+    const normalized = text.replace(/[|]/g, '/').replace(/[ \t]+/g, ' ');
+
+    const months = {
+      jan:1,january:1, feb:2,february:2, mar:3,march:3, apr:4,april:4,
+      may:5, jun:6,june:6, jul:7,july:7, aug:8,august:8,
+      sep:9,sept:9,september:9, oct:10,october:10, nov:11,november:11, dec:12,december:12
+    };
+
+    // Collect ALL possible date candidates, then score them
+    const candidates = [];
+
+    // Pattern 1: YYYY-MM-DD or YYYY/MM/DD
+    for (const m of normalized.matchAll(/\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/g)) {
+      candidates.push({ y: +m[1], mo: +m[2], d: +m[3], raw: m[0] });
+    }
+
+    // Pattern 2: MM/DD/YY, MM/DD/YYYY, MM-DD-YY, MM.DD.YY  (US style, most common on receipts)
+    for (const m of normalized.matchAll(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})\b/g)) {
+      let y = +m[3];
+      if (y < 100) y += y < 70 ? 2000 : 1900; // 25 -> 2025, 99 -> 1999
+      candidates.push({ y, mo: +m[1], d: +m[2], raw: m[0] });
+    }
+
+    // Pattern 3: "Apr 20, 2025" / "April 20 2025" / "Apr 20 25"
+    const monthNameRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b/gi;
+    for (const m of normalized.matchAll(monthNameRe)) {
+      let y = +m[3];
+      if (y < 100) y += y < 70 ? 2000 : 1900;
+      candidates.push({ y, mo: months[m[1].toLowerCase()], d: +m[2], raw: m[0] });
+    }
+
+    // Pattern 4: "20 Apr 2025" / "20-Apr-2025"
+    const dayMonthRe = /\b(\d{1,2})[-\s](jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?[-\s](\d{2,4})\b/gi;
+    for (const m of normalized.matchAll(dayMonthRe)) {
+      let y = +m[3];
+      if (y < 100) y += y < 70 ? 2000 : 1900;
+      candidates.push({ y, mo: months[m[2].toLowerCase()], d: +m[1], raw: m[0] });
+    }
+
+    // Pattern 5: MM/DD only (no year) — fall back to current year
+    // Only try this if nothing else matched, handled below.
+
+    // Validate and score candidates
+    const now = new Date();
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+    const fiveYearsAgo = new Date(now); fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
+
+    const valid = [];
+    for (const c of candidates) {
+      if (!c.mo || c.mo < 1 || c.mo > 12) continue;
+      if (!c.d || c.d < 1 || c.d > 31) continue;
+      if (c.y < 2000 || c.y > 2100) continue;
+      const parsed = new Date(c.y, c.mo - 1, c.d);
+      if (parsed.getMonth() !== c.mo - 1) continue; // caught invalid like Feb 30
+      if (parsed > tomorrow) continue; // no future dates
+      if (parsed < fiveYearsAgo) continue; // likely OCR garbage
+      valid.push({ ...c, parsed });
+    }
+
+    // Pick the most recent valid date (receipts show purchase date, often latest date on page)
+    if (valid.length) {
+      valid.sort((a, b) => b.parsed - a.parsed);
+      const best = valid[0];
+      return best.y + '-' + String(best.mo).padStart(2, '0') + '-' + String(best.d).padStart(2, '0');
+    }
+
+    // Last resort: MM/DD without year (common on thermal receipts)
+    const noYearMatch = normalized.match(/\b(\d{1,2})[-\/.](\d{1,2})\b(?!\s*[-\/.])/);
+    if (noYearMatch) {
+      const mo = +noYearMatch[1], d = +noYearMatch[2];
+      if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+        const y = now.getFullYear();
+        const parsed = new Date(y, mo - 1, d);
+        // If that would be in the future, assume it was last year
+        const useYear = parsed > tomorrow ? y - 1 : y;
+        return useYear + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      }
+    }
+
+    return null;
+  }
+
+  function guessCategory(vendor) {
+    if (!vendor) return null;
+    const v = vendor.toLowerCase();
+    const rules = [
+      { cat: 'Vehicle/Gas', keywords: ['shell','exxon','chevron','bp ','mobil','valero','texaco','76 ','arco','sunoco','marathon','phillips 66','circle k','wawa','gas','fuel','pilot','flying j','loves travel'] },
+      { cat: 'Meals & Entertainment', keywords: ['restaurant','cafe','coffee','starbucks','mcdonald','chipotle','subway','pizza','grill','kitchen','bar ','bistro','diner','deli','bakery','taco','burger','chick-fil','panera','dunkin','whataburger','wendy','sonic','in-n-out','doordash','uber eats','grubhub','postmates'] },
+      { cat: 'Travel & Mileage', keywords: ['airlines','airways','hotel','inn','marriott','hilton','hyatt','airbnb','delta','united','american air','southwest','jetblue','uber','lyft','taxi','rental car','hertz','enterprise','avis','budget rent'] },
+      { cat: 'Office Supplies', keywords: ['office depot','officemax','staples','quill','uline','amazon','target','walmart','costco'] },
+      { cat: 'Software & Subscriptions', keywords: ['adobe','microsoft','google','dropbox','zoom','slack','notion','github','quickbooks','netflix','apple.com','spotify','canva','figma','anthropic','openai'] },
+      { cat: 'Equipment', keywords: ['home depot','lowes','ace hardware','harbor freight','best buy','b&h','newegg','apple store'] },
+      { cat: 'Advertising/Marketing', keywords: ['facebook','meta','instagram','google ads','yelp','linkedin','mailchimp','constant contact'] },
+      { cat: 'Utilities', keywords: ['electric','gas company','water','comcast','xfinity','at&t','verizon','t-mobile','sprint','spectrum','cox communications'] },
+    ];
+    for (const r of rules) {
+      if (r.keywords.some(k => v.includes(k))) return r.cat;
+    }
+    return null;
+  }
+
+  function applyOCRResults(parsed) {
+    const amountEl = document.getElementById('amount');
+    const vendorEl = document.getElementById('vendor');
+    const dateEl = document.getElementById('date');
+    const categoryEl = document.getElementById('category');
+
+    if (parsed.amount && !amountEl.value) amountEl.value = parsed.amount;
+    if (parsed.vendor && !vendorEl.value) vendorEl.value = parsed.vendor;
+    if (parsed.date && !dateEl.value) dateEl.value = parsed.date;
+
+    const cat = guessCategory(parsed.vendor);
+    if (cat && !categoryEl.value) categoryEl.value = cat;
+  }
+
+  document.getElementById('receiptForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const data = {
+      id: state.editingId || uid(),
+      amount: parseFloat(document.getElementById('amount').value) || 0,
+      vendor: document.getElementById('vendor').value.trim(),
+      category: document.getElementById('category').value,
+      date: document.getElementById('date').value,
+      notes: document.getElementById('notes').value.trim(),
+      photo: state.pendingPhoto,
+      created: Date.now()
+    };
+
+    if (state.editingId) {
+      const idx = state.receipts.findIndex(r => r.id === state.editingId);
+      if (idx >= 0) {
+        data.created = state.receipts[idx].created || Date.now();
+        state.receipts[idx] = data;
+      }
+    } else {
+      state.receipts.push(data);
+    }
+    save();
+    closeModal();
+    renderAll();
+  });
+
+  document.getElementById('deleteBtn').addEventListener('click', () => {
+    if (!state.editingId) return;
+    if (!confirm('Delete this receipt? This cannot be undone.')) return;
+    state.receipts = state.receipts.filter(r => r.id !== state.editingId);
+    save();
+    closeModal();
+    renderAll();
+  });
+
+  // ---------- Detail View ----------
+  function openDetail(id) {
+    const r = state.receipts.find(x => x.id === id);
+    if (!r) return;
+    const content = document.getElementById('detailContent');
+    const photo = r.photo ? '<img class="detail-photo" src="' + r.photo + '" alt="receipt">' : '';
+    content.innerHTML = photo +
+      '<div class="amount-big num">' + fmt(r.amount) + '</div>' +
+      '<div class="detail-row"><span class="key">Vendor</span><span class="val">' + escapeHtml(r.vendor) + '</span></div>' +
+      '<div class="detail-row"><span class="key">Category</span><span class="val">' + escapeHtml(r.category) + '</span></div>' +
+      '<div class="detail-row"><span class="key">Date</span><span class="val">' + fmtDate(r.date) + '</span></div>' +
+      (r.notes ? '<div class="detail-row"><span class="key">Notes</span><span class="val" style="max-width:60%">' + escapeHtml(r.notes) + '</span></div>' : '');
+    document.getElementById('editBtn').onclick = () => {
+      document.getElementById('detailBackdrop').classList.remove('active');
+      openModal(id);
+    };
+    document.getElementById('detailBackdrop').classList.add('active');
+  }
+
+  // ---------- Tabs ----------
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'summary') renderSummary();
+    });
+  });
+
+  // Period buttons
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.activePeriod = btn.dataset.period;
+      renderSummary();
+    });
+  });
+
+  // ---------- CSV Export ----------
+  function exportCSV() {
+    if (state.receipts.length === 0) {
+      alert('No receipts to export yet.');
+      return;
+    }
+    const headers = ['Date', 'Vendor', 'Category', 'Amount', 'Notes'];
+    const rows = state.receipts.slice()
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+      .map(r => [
+        r.date || '',
+        r.vendor || '',
+        r.category || '',
+        (Number(r.amount) || 0).toFixed(2),
+        r.notes || ''
+      ]);
+    const csv = [headers, ...rows].map(row =>
+      row.map(v => {
+        const s = String(v).replace(/"/g, '""');
+        return /[",\n]/.test(s) ? '"' + s + '"' : s;
+      }).join(',')
+    ).join('\n');
+
+    // Also offer JSON backup with photos
+    const choice = confirm('Tap OK for CSV (for accountant, no photos).\nTap Cancel for full JSON backup (with photos).');
+    if (choice) {
+      downloadFile(csv, 'receipts-' + new Date().toISOString().slice(0,10) + '.csv', 'text/csv');
+    } else {
+      downloadFile(JSON.stringify(state.receipts, null, 2), 'receipts-backup-' + new Date().toISOString().slice(0,10) + '.json', 'application/json');
+    }
+  }
+
+  function downloadFile(content, filename, type) {
+    const blob = new Blob([content], { type: type + ';charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', exportCSV);
+
+  // Import backup
+  document.getElementById('importBtn').addEventListener('click', () => {
+    document.getElementById('importFile').click();
+  });
+  document.getElementById('importFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data)) throw new Error('Invalid format');
+        if (!confirm('Import ' + data.length + ' receipts? This will merge with your existing ones.')) return;
+        const existingIds = new Set(state.receipts.map(r => r.id));
+        data.forEach(r => { if (!existingIds.has(r.id)) state.receipts.push(r); });
+        save();
+        renderAll();
+        alert('Imported successfully.');
+      } catch(err) {
+        alert('Could not read backup file.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // Modal triggers
+  document.getElementById('addBtn').addEventListener('click', () => openModal());
+  document.getElementById('closeModal').addEventListener('click', closeModal);
+  document.getElementById('closeDetail').addEventListener('click', () => {
+    document.getElementById('detailBackdrop').classList.remove('active');
+  });
+  document.getElementById('modalBackdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'modalBackdrop') closeModal();
+  });
+  document.getElementById('detailBackdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'detailBackdrop') document.getElementById('detailBackdrop').classList.remove('active');
+  });
+
+  // iOS install hint (shown once)
+  function maybeShowInstallHint() {
+    const ua = navigator.userAgent;
+    const isIOS = /iPhone|iPad|iPod/.test(ua);
+    const isStandalone = window.navigator.standalone === true;
+    const dismissed = localStorage.getItem('install_hint_dismissed');
+    if (isIOS && !isStandalone && !dismissed) {
+      document.getElementById('installHint').classList.add('show');
+      document.querySelector('#installHint .close').addEventListener('click', () => {
+        localStorage.setItem('install_hint_dismissed', '1');
+      });
+    }
+  }
+
+  function renderAll() {
+    renderFilters();
+    renderReceipts();
+    renderSummary();
+  }
+
+  // Init
+  load();
+  renderAll();
+  maybeShowInstallHint();
+
+  // Debug helper: paste `debugOCR()` into Safari Web Inspector console
+  // to see what text Tesseract read from the last receipt
+  window.debugOCR = function() {
+    console.log('=== Last OCR output ===');
+    console.log(state.lastOCRText || '(no receipt scanned yet)');
+    return state.lastOCRText;
+  };
+})();
+</script>
+</body>
+</html>
